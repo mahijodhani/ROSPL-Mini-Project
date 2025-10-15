@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📰 Real-Time Event Detection</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: #f4f6f8;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            color: #222;
+        }
+        #controls {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #0078d7;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #005fa3;
+        }
+        #events {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+        }
+        .event {
+            background-color: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        }
+        .event h3 {
+            margin: 0;
+            font-size: 1.1em;
+        }
+        .event p {
+            color: #555;
+        }
+        .category {
+            display: inline-block;
+            margin-top: 5px;
+            padding: 4px 8px;
+            font-size: 0.8em;
+            background-color: #e3e3e3;
+            border-radius: 6px;
+        }
+    </style>
+</head>
+<body>
+    <h1>📰 Real-Time Event Detection</h1>
+
+    <div id="controls">
+        <input type="text" id="searchBox" placeholder="Search events (e.g., business, technology)..." 
+               style="padding:8px;width:300px;" onkeyup="handleSearch()">
+        <button onclick="searchEvents()">🔍 Search</button>
+        <button onclick="fetchEvents()">🔄 Refresh All</button>
+        <button onclick="evaluateSystem()" style="background-color:#28a745;">📊 Evaluate System</button>
+        <br><br>
+        <label style="font-size:14px;">
+            <input type="checkbox" id="fetchFreshCheck"> 
+            🌐 Fetch fresh documents from API for search (slower but more results)
+        </label>
+        <br>
+        <label style="font-size:14px;">
+            <input type="checkbox" id="showMetricsCheck" checked> 
+            📊 Show evaluation metrics for each search
+        </label>
+    </div>
+
+    <div id="searchMetrics" style="margin:20px auto; max-width:800px; background:#fff3cd; padding:15px; border-radius:10px; display:none; border-left:4px solid #ffc107; position:relative;">
+        <button onclick="closeSearchMetrics()" style="position:absolute; top:10px; right:10px; background:#dc3545; padding:5px 10px; color:white; border:none; border-radius:4px; cursor:pointer;">✖ Close</button>
+        <strong>📊 Search Quality Metrics</strong>
+        <div id="searchMetricsContent"></div>
+    </div>
+
+    <div id="evaluation" style="margin:20px auto; max-width:800px; background:white; padding:20px; border-radius:10px; display:none; position:relative;">
+        <button onclick="closeEvaluation()" style="position:absolute; top:10px; right:10px; background:#dc3545; padding:5px 10px;">✖ Close</button>
+        <h2>📊 System Evaluation Results</h2>
+        <div id="evaluationContent"></div>
+    </div>
+
+    <div id="events">Loading...</div>
+
+    <script>
+        let allEvents = [];
+        let searchTimeout = null;
+
+        async function fetchEvents() {
+            document.getElementById('events').innerHTML = 'Fetching latest news...';
+            document.getElementById('searchBox').value = '';
+            const res = await fetch('/events');
+            const data = await res.json();
+            allEvents = data;
+            displayEvents(data);
+        }
+
+        async function searchEvents() {
+            const query = document.getElementById('searchBox').value.trim();
+            if (!query) {
+                displayEvents(allEvents);
+                document.getElementById('searchMetrics').style.display = 'none';
+                return;
+            }
+
+            const fetchFresh = document.getElementById('fetchFreshCheck').checked;
+            const showMetrics = document.getElementById('showMetricsCheck').checked;
+            
+            if (fetchFresh) {
+                document.getElementById('events').innerHTML = '🌐 Fetching fresh documents from API...';
+            } else {
+                document.getElementById('events').innerHTML = 'Searching...';
+            }
+            
+            const url = `/search?q=${encodeURIComponent(query)}&fetch_fresh=${fetchFresh}&evaluate=${showMetrics}`;
+            const res = await fetch(url);
+            const data = await res.json();
+            
+            if (data.error) {
+                document.getElementById('events').innerHTML = `<p>Error: ${data.error}</p>`;
+                return;
+            }
+            
+            // Check if we got metrics back
+            if (data.metrics) {
+                displaySearchMetrics(data.metrics, query);
+                displayEvents(data.results);
+            } else {
+                document.getElementById('searchMetrics').style.display = 'none';
+                displayEvents(data);
+            }
+        }
+
+        function displaySearchMetrics(metrics, query) {
+            document.getElementById('searchMetrics').style.display = 'block';
+            
+            const html = `
+                <div style="margin-top:10px;">
+                    <strong>Query:</strong> "${query}"<br>
+                    <strong>Retrieved:</strong> ${metrics.total_retrieved} documents | 
+                    <strong>Relevant:</strong> ${metrics.total_relevant} documents<br><br>
+                    
+                    <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:10px; margin-top:10px;">
+                        <div style="background:white; padding:10px; border-radius:5px;">
+                            <strong>Precision:</strong> ${(metrics.precision * 100).toFixed(1)}%
+                            <div style="background:#e0e0e0; height:8px; border-radius:4px; margin-top:5px;">
+                                <div style="background:#4caf50; height:8px; border-radius:4px; width:${metrics.precision * 100}%;"></div>
+                            </div>
+                        </div>
+                        <div style="background:white; padding:10px; border-radius:5px;">
+                            <strong>Recall:</strong> ${(metrics.recall * 100).toFixed(1)}%
+                            <div style="background:#e0e0e0; height:8px; border-radius:4px; margin-top:5px;">
+                                <div style="background:#2196f3; height:8px; border-radius:4px; width:${metrics.recall * 100}%;"></div>
+                            </div>
+                        </div>
+                        <div style="background:white; padding:10px; border-radius:5px;">
+                            <strong>F1 Score:</strong> ${(metrics.f1 * 100).toFixed(1)}%
+                            <div style="background:#e0e0e0; height:8px; border-radius:4px; margin-top:5px;">
+                                <div style="background:#ff9800; height:8px; border-radius:4px; width:${metrics.f1 * 100}%;"></div>
+                            </div>
+                        </div>
+                        <div style="background:white; padding:10px; border-radius:5px;">
+                            <strong>Accuracy:</strong> ${(metrics.accuracy * 100).toFixed(1)}%
+                            <div style="background:#e0e0e0; height:8px; border-radius:4px; margin-top:5px;">
+                                <div style="background:#9c27b0; height:8px; border-radius:4px; width:${metrics.accuracy * 100}%;"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <small style="color:#666; margin-top:10px; display:block;">
+                        TP: ${metrics.tp} | FP: ${metrics.fp} | FN: ${metrics.fn}
+                    </small>
+                </div>
+            `;
+            
+            document.getElementById('searchMetricsContent').innerHTML = html;
+        }
+
+        function handleSearch() {
+            // Debounce search - wait 800ms after user stops typing
+            // Longer delay if fetching fresh to avoid too many API calls
+            clearTimeout(searchTimeout);
+            const fetchFresh = document.getElementById('fetchFreshCheck').checked;
+            const delay = fetchFresh ? 1500 : 800;
+            
+            searchTimeout = setTimeout(() => {
+                const query = document.getElementById('searchBox').value.trim();
+                if (query) {
+                    searchEvents();
+                } else {
+                    displayEvents(allEvents);
+                }
+            }, delay);
+        }
+
+        function displayEvents(events) {
+            if (events.length === 0) {
+                document.getElementById('events').innerHTML = '<p>No events found. Try a different search term.</p>';
+                return;
+            }
+
+            const html = events.map(ev => `
+                <div class="event">
+                    <h3><a href="${ev.url}" target="_blank">${ev.title || "No title"}</a></h3>
+                    <p>${ev.description || "No description available."}</p>
+                    <span class="category">${ev.category || "General"}</span>
+                    ${ev.score ? `<span class="category" style="background-color:#d4edda;">Score: ${ev.score.toFixed(3)}</span>` : ''}
+                    <br>
+                    <small>${ev.published_at ? new Date(ev.published_at).toLocaleString() : ""}</small>
+                </div>
+            `).join('');
+            document.getElementById('events').innerHTML = html;
+        }
+
+        function closeEvaluation() {
+            document.getElementById('evaluation').style.display = 'none';
+        }
+
+        function closeSearchMetrics() {
+            document.getElementById('searchMetrics').style.display = 'none';
+        }
+
+        async function evaluateSystem() {
+            document.getElementById('evaluation').style.display = 'block';
+            document.getElementById('evaluationContent').innerHTML = 'Running evaluation...';
+            
+            const res = await fetch('/evaluate');
+            const data = await res.json();
+            
+            if (data.error) {
+                document.getElementById('evaluationContent').innerHTML = `<p style="color:red;">Error: ${data.error}</p>`;
+                return;
+            }
+            
+            const metrics = data.metrics;
+            const perQuery = data.per_query;
+            
+            let html = `
+                <div style="background:#e8f5e9; padding:10px; border-radius:8px; margin-bottom:15px;">
+                    <strong>📄 Total Documents:</strong> ${data.total_documents || 'N/A'} | 
+                    <strong>🏷️ Categories Tested:</strong> ${data.categories_tested || 'N/A'}
+                </div>
+                <div style="background:#f0f8ff; padding:15px; border-radius:8px; margin-bottom:20px;">
+                    <h3>Overall Metrics</h3>
+                    <table style="width:100%; border-collapse:collapse;">
+                        <tr style="border-bottom:1px solid #ddd;">
+                            <td style="padding:8px;"><strong>Precision:</strong></td>
+                            <td style="padding:8px;">${(metrics.precision * 100).toFixed(2)}%</td>
+                        </tr>
+                        <tr style="border-bottom:1px solid #ddd;">
+                            <td style="padding:8px;"><strong>Recall:</strong></td>
+                            <td style="padding:8px;">${(metrics.recall * 100).toFixed(2)}%</td>
+                        </tr>
+                        <tr style="border-bottom:1px solid #ddd;">
+                            <td style="padding:8px;"><strong>F1 Score:</strong></td>
+                            <td style="padding:8px;">${(metrics.f1_score * 100).toFixed(2)}%</td>
+                        </tr>
+                        <tr style="border-bottom:1px solid #ddd;">
+                            <td style="padding:8px;"><strong>Accuracy:</strong></td>
+                            <td style="padding:8px;">${(metrics.accuracy * 100).toFixed(2)}%</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:8px;"><strong>MAP (Mean Avg Precision):</strong></td>
+                            <td style="padding:8px;">${(metrics.map * 100).toFixed(2)}%</td>
+                        </tr>
+                    </table>
+                </div>
+                
+                <h3>Per-Query Results</h3>
+                <div style="max-height:400px; overflow-y:auto;">
+            `;
+            
+            perQuery.forEach(q => {
+                html += `
+                    <div style="background:#f9f9f9; padding:12px; margin:10px 0; border-left:4px solid #0078d7; border-radius:4px;">
+                        <strong>Query: "${q.query}"</strong><br>
+                        <small>
+                            Precision: ${(q.precision * 100).toFixed(1)}% | 
+                            Recall: ${(q.recall * 100).toFixed(1)}% | 
+                            F1: ${(q.f1 * 100).toFixed(1)}% | 
+                            Accuracy: ${(q.accuracy * 100).toFixed(1)}%<br>
+                            TP: ${q.tp}, FP: ${q.fp}, FN: ${q.fn}
+                        </small>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            document.getElementById('evaluationContent').innerHTML = html;
+        }
+
+        // Auto-fetch events on page load
+        window.onload = fetchEvents;
+    </script>
+</body>
+</html>
